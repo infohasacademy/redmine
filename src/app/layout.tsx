@@ -15,17 +15,12 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Synchro PM - Modern Project Management",
+  title: "Synchro PM - Multi-Tenant Project Management",
   description: "A comprehensive multi-tenant SaaS project management system combining the best of Jira, Redmine, and Asana.",
   keywords: ["Project Management", "SaaS", "Kanban", "Gantt", "Team Collaboration", "Issue Tracking"],
   authors: [{ name: "Synchro PM Team" }],
   icons: {
     icon: "/logo.svg",
-  },
-  openGraph: {
-    title: "Synchro PM - Modern Project Management",
-    description: "Multi-tenant SaaS project management system",
-    type: "website",
   },
 };
 

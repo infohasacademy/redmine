@@ -4,7 +4,7 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
 import GitHubProvider from "next-auth/providers/github";
 import { prisma } from "./db";
-import { compare } from "bcrypt";
+import * as bcrypt from "bcrypt";
 
 declare module "next-auth" {
   interface Session {
@@ -13,6 +13,8 @@ declare module "next-auth" {
       email: string;
       name?: string | null;
       image?: string | null;
+      role: string;
+      organizationId?: string | null;
     };
   }
   interface User {
@@ -20,6 +22,8 @@ declare module "next-auth" {
     email: string;
     name?: string | null;
     image?: string | null;
+    role: string;
+    organizationId?: string | null;
   }
 }
 
@@ -29,6 +33,8 @@ declare module "next-auth/jwt" {
     email: string;
     name?: string | null;
     picture?: string | null;
+    role: string;
+    organizationId?: string | null;
   }
 }
 
@@ -42,7 +48,6 @@ export const authOptions: NextAuthOptions = {
     signIn: "/auth/signin",
     signOut: "/auth/signout",
     error: "/auth/error",
-    verifyRequest: "/auth/verify-request",
   },
   providers: [
     GoogleProvider({
@@ -67,14 +72,21 @@ export const authOptions: NextAuthOptions = {
         }
 
         const user = await prisma.user.findUnique({
-          where: { email: credentials.email },
+          where: { email: credentials.email.toLowerCase() },
+          include: {
+            memberships: {
+              where: { isActive: true },
+              orderBy: { joinedAt: "desc" },
+              take: 1,
+            },
+          },
         });
 
-        if (!user || !user.password) {
+        if (!user || !user.password || !user.isActive) {
           return null;
         }
 
-        const isPasswordValid = await compare(
+        const isPasswordValid = await bcrypt.compare(
           credentials.password,
           user.password
         );
@@ -83,11 +95,19 @@ export const authOptions: NextAuthOptions = {
           return null;
         }
 
+        // Update last login
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { lastLoginAt: new Date() },
+        });
+
         return {
           id: user.id,
           email: user.email,
           name: user.name,
           image: user.image,
+          role: user.memberships[0]?.role || "GUEST",
+          organizationId: user.memberships[0]?.organizationId || null,
         };
       },
     }),
@@ -99,6 +119,8 @@ export const authOptions: NextAuthOptions = {
         token.email = user.email;
         token.name = user.name;
         token.picture = user.image;
+        token.role = (user as any).role || "GUEST";
+        token.organizationId = (user as any).organizationId || null;
       }
       return token;
     },
@@ -109,6 +131,8 @@ export const authOptions: NextAuthOptions = {
           email: token.email,
           name: token.name,
           image: token.picture,
+          role: token.role,
+          organizationId: token.organizationId,
         };
       }
       return session;
@@ -118,14 +142,15 @@ export const authOptions: NextAuthOptions = {
         return true;
       }
 
-      // For OAuth providers, check if user exists or create
+      // For OAuth providers
       if (user.email) {
         const existingUser = await prisma.user.findUnique({
           where: { email: user.email },
+          include: { memberships: true },
         });
 
         if (!existingUser) {
-          // User will be created by PrismaAdapter
+          // Create user with OAuth - will be handled by PrismaAdapter
           return true;
         }
       }
@@ -135,10 +160,7 @@ export const authOptions: NextAuthOptions = {
   },
   events: {
     async signIn({ user }) {
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { lastLoginAt: new Date() },
-      });
+      console.log(`User signed in: ${user.email}`);
     },
   },
   debug: process.env.NODE_ENV === "development",
@@ -158,6 +180,14 @@ export const requireAuth = async () => {
   const user = await getCurrentUser();
   if (!user) {
     throw new Error("Unauthorized");
+  }
+  return user;
+};
+
+export const requireAdmin = async () => {
+  const user = await requireAuth();
+  if (user.role !== "OWNER" && user.role !== "ADMIN") {
+    throw new Error("Admin access required");
   }
   return user;
 };

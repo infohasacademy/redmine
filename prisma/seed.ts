@@ -1,4 +1,4 @@
-import { PrismaClient, UserRole, TicketStatus, TicketPriority, TicketType, ProjectVisibility } from '@prisma/client';
+import { PrismaClient, UserRole, TicketStatus, TicketPriority, TicketType, ProjectVisibility, ActivityType, NotificationType } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
@@ -145,8 +145,8 @@ async function main() {
   console.log(`✅ Created Kanban columns for all projects`);
 
   // Create tickets
+  const tickets: any[] = [];
   let ticketNumber = 1;
-  const tickets = [];
 
   for (const project of projects) {
     const columns = await prisma.kanbanColumn.findMany({
@@ -239,7 +239,7 @@ async function main() {
       projectId: projects[0].id,
       ticketId: tickets[0].id,
       userId: users[0].id,
-      type: 'STATUS_CHANGED',
+      type: ActivityType.STATUS_CHANGED,
       description: `moved ${tickets[0].key} to In Progress`,
     },
     {
@@ -247,7 +247,7 @@ async function main() {
       projectId: projects[0].id,
       ticketId: tickets[1].id,
       userId: users[1].id,
-      type: 'CREATED',
+      type: ActivityType.CREATED,
       description: `created ticket ${tickets[1].key}`,
     },
     {
@@ -255,14 +255,14 @@ async function main() {
       projectId: projects[1].id,
       ticketId: tickets[2].id,
       userId: users[2].id,
-      type: 'ASSIGNED',
+      type: ActivityType.ASSIGNED,
       description: `assigned ${tickets[2].key} to ${users[2].name}`,
     },
     {
       organizationId: org.id,
       projectId: projects[2].id,
       userId: users[3].id,
-      type: 'CREATED',
+      type: ActivityType.CREATED,
       description: `completed CI/CD setup for ${projects[2].name}`,
     },
   ];
@@ -277,21 +277,21 @@ async function main() {
   const notifications = [
     {
       userId: users[0].id,
-      type: 'TICKET_ASSIGNED',
+      type: NotificationType.TICKET_ASSIGNED,
       title: 'New ticket assigned',
       message: `You have been assigned to ${tickets[0].key}: ${tickets[0].title}`,
       isRead: false,
     },
     {
       userId: users[1].id,
-      type: 'PROJECT_INVITED',
+      type: NotificationType.PROJECT_INVITED,
       title: 'Project invitation',
       message: `You have been added to project ${projects[0].name}`,
       isRead: false,
     },
     {
       userId: users[2].id,
-      type: 'TICKET_COMMENTED',
+      type: NotificationType.TICKET_COMMENTED,
       title: 'New comment',
       message: `Someone commented on ${tickets[2].key}`,
       isRead: true,

@@ -6,22 +6,24 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('🔐 Creating admin user...');
 
-  const adminEmail = 'Ranelsabah';
+  // Admin credentials - using proper email format for authentication
+  const adminEmail = 'ranelsabah@admin.synchropm.com';
+  const adminUsername = 'Ranelsabah'; // Username for display
   const adminPassword = 'Santafee@@@@@1972';
   const hashedPassword = await bcrypt.hash(adminPassword, 12);
 
   // Create or update admin user
   const adminUser = await prisma.user.upsert({
-    where: { email: adminEmail.toLowerCase() },
+    where: { email: adminEmail },
     update: {
       password: hashedPassword,
       isActive: true,
-      name: 'Ranel Sabah',
+      name: adminUsername,
       emailVerified: new Date(),
     },
     create: {
-      email: adminEmail.toLowerCase(),
-      name: 'Ranel Sabah',
+      email: adminEmail,
+      name: adminUsername,
       password: hashedPassword,
       isActive: true,
       emailVerified: new Date(),
@@ -76,8 +78,9 @@ async function main() {
 
   console.log('\n🎉 Admin setup completed!');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log(`Email: ${adminEmail.toLowerCase()}`);
+  console.log(`Email/Username: ${adminEmail}`);
   console.log(`Password: ${adminPassword}`);
+  console.log(`Role: Super Admin (OWNER)`);
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 }
 

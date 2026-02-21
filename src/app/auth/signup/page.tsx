@@ -9,41 +9,89 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
-import { Eye, EyeOff, Mail, Lock, Github, Chrome, Loader2, AlertCircle } from "lucide-react";
+import { Eye, EyeOff, Mail, Lock, User, Github, Chrome, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
 
-function SignInForm() {
+function SignUpForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get("callbackUrl") || "/";
-  const error = searchParams.get("error");
 
-  const [identifier, setIdentifier] = useState(""); // Email or username
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [loginError, setLoginError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+
+  const validateForm = () => {
+    if (!name.trim()) {
+      setError("Name is required");
+      return false;
+    }
+    if (!email.trim()) {
+      setError("Email is required");
+      return false;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setError("Please enter a valid email address");
+      return false;
+    }
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters");
+      return false;
+    }
+    if (password !== confirmPassword) {
+      setError("Passwords do not match");
+      return false;
+    }
+    return true;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError(null);
+
+    if (!validateForm()) return;
+
     setIsLoading(true);
-    setLoginError(null);
 
     try {
-      const result = await signIn("credentials", {
-        identifier, // Can be email or username
-        password,
-        redirect: false,
-        callbackUrl,
+      const response = await fetch("/api/auth/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, email, password }),
       });
 
-      if (result?.error) {
-        setLoginError("Invalid email or password. Please try again.");
-      } else {
-        router.push(callbackUrl);
-        router.refresh();
+      const data = await response.json();
+
+      if (!response.ok) {
+        setError(data.error || "Registration failed. Please try again.");
+        return;
       }
+
+      setSuccess(true);
+
+      // Auto sign in after successful registration
+      setTimeout(async () => {
+        const result = await signIn("credentials", {
+          email,
+          password,
+          redirect: false,
+          callbackUrl,
+        });
+
+        if (result?.error) {
+          setError("Account created but auto-login failed. Please sign in manually.");
+          setTimeout(() => router.push("/auth/signin"), 2000);
+        } else {
+          router.push(callbackUrl);
+          router.refresh();
+        }
+      }, 1000);
     } catch (err) {
-      setLoginError("An error occurred. Please try again.");
+      setError("An error occurred. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -54,24 +102,41 @@ function SignInForm() {
     await signIn(provider, { callbackUrl });
   };
 
+  if (success) {
+    return (
+      <Card className="border-0 shadow-xl">
+        <CardContent className="pt-6">
+          <div className="flex flex-col items-center text-center space-y-4">
+            <div className="h-16 w-16 rounded-full bg-green-100 dark:bg-green-900 flex items-center justify-center">
+              <CheckCircle2 className="h-8 w-8 text-green-600 dark:text-green-400" />
+            </div>
+            <h3 className="text-xl font-semibold">Account Created!</h3>
+            <p className="text-muted-foreground">
+              Redirecting you to your dashboard...
+            </p>
+            <Loader2 className="h-6 w-6 animate-spin text-primary" />
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card className="border-0 shadow-xl">
       <CardHeader className="space-y-1 pb-4">
         <CardTitle className="text-2xl font-semibold text-center">
-          Welcome back
+          Create an account
         </CardTitle>
         <CardDescription className="text-center">
-          Sign in to your account to continue
+          Get started with your free account today
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Error Messages */}
-        {(error || loginError) && (
+        {/* Error Message */}
+        {error && (
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
-            <AlertDescription>
-              {loginError || "Authentication failed. Please try again."}
-            </AlertDescription>
+            <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
 
@@ -108,18 +173,34 @@ function SignInForm() {
           </div>
         </div>
 
-        {/* Credentials Form */}
+        {/* Registration Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="identifier">Email or Username</Label>
+            <Label htmlFor="name">Full Name</Label>
+            <div className="relative">
+              <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                id="name"
+                type="text"
+                placeholder="John Doe"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="pl-10"
+                required
+                disabled={isLoading}
+              />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="email">Email</Label>
             <div className="relative">
               <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
-                id="identifier"
-                type="text"
-                placeholder="Enter your email or username"
-                value={identifier}
-                onChange={(e) => setIdentifier(e.target.value)}
+                id="email"
+                type="email"
+                placeholder="name@company.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 className="pl-10"
                 required
                 disabled={isLoading}
@@ -152,27 +233,46 @@ function SignInForm() {
                 )}
               </button>
             </div>
+            <p className="text-xs text-muted-foreground">
+              Must be at least 8 characters
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="confirmPassword">Confirm Password</Label>
+            <div className="relative">
+              <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                id="confirmPassword"
+                type={showPassword ? "text" : "password"}
+                placeholder="••••••••"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                className="pl-10"
+                required
+                disabled={isLoading}
+              />
+            </div>
           </div>
           <Button type="submit" className="w-full" disabled={isLoading}>
             {isLoading ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Signing in...
+                Creating account...
               </>
             ) : (
-              "Sign in"
+              "Create account"
             )}
           </Button>
         </form>
       </CardContent>
       <CardFooter className="flex flex-col space-y-4 pt-0">
         <p className="text-center text-sm text-muted-foreground">
-          Don't have an account?{" "}
+          Already have an account?{" "}
           <a
-            href="/auth/signup"
+            href="/auth/signin"
             className="text-primary underline-offset-4 hover:underline"
           >
-            Sign up
+            Sign in
           </a>
         </p>
       </CardFooter>
@@ -180,7 +280,7 @@ function SignInForm() {
   );
 }
 
-export default function SignInPage() {
+export default function SignUpPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-muted p-4">
       <div className="w-full max-w-md space-y-8">
@@ -207,7 +307,7 @@ export default function SignInPage() {
           </p>
         </div>
 
-        {/* Sign In Card */}
+        {/* Sign Up Card */}
         <Suspense
           fallback={
             <Card className="border-0 shadow-xl">
@@ -217,11 +317,11 @@ export default function SignInPage() {
             </Card>
           }
         >
-          <SignInForm />
+          <SignUpForm />
         </Suspense>
 
         <p className="text-center text-xs text-muted-foreground">
-          By signing in, you agree to our Terms of Service and Privacy Policy
+          By creating an account, you agree to our Terms of Service and Privacy Policy
         </p>
       </div>
     </div>

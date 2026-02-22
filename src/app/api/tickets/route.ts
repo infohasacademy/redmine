@@ -4,24 +4,33 @@ import { requireAuth } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { TicketStatus, TicketPriority, TicketType } from "@prisma/client";
 
-// GET /api/tickets - Get tickets
+// GET /api/tickets - Get tickets for current user
 export async function GET(request: NextRequest) {
   try {
     const user = await requireAuth();
     const { searchParams } = new URL(request.url);
     const projectId = searchParams.get("projectId");
-    const organizationId = searchParams.get("organizationId");
     const status = searchParams.get("status");
     const priority = searchParams.get("priority");
     const assigneeId = searchParams.get("assigneeId");
     const search = searchParams.get("search");
 
-    let whereClause: any = {};
+    // Get user's organization membership
+    const membership = await prisma.organizationMember.findFirst({
+      where: { userId: user.id, isActive: true },
+      orderBy: { joinedAt: "desc" },
+    });
+
+    if (!membership) {
+      return NextResponse.json({ tickets: [] });
+    }
+
+    let whereClause: any = {
+      project: { organizationId: membership.organizationId }
+    };
 
     if (projectId) {
       whereClause.projectId = projectId;
-    } else if (organizationId) {
-      whereClause.project = { organizationId };
     }
 
     if (status) {
@@ -85,22 +94,33 @@ export async function POST(request: NextRequest) {
       parentId,
     } = body;
 
-    // Check project membership
-    const projectMember = await prisma.projectMember.findFirst({
-      where: { projectId, userId: user.id },
+    if (!projectId || !title) {
+      return NextResponse.json(
+        { error: "Project ID and title are required" },
+        { status: 400 }
+      );
+    }
+
+    // Check project exists and user has access
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      include: {
+        members: { where: { userId: user.id } },
+        organization: {
+          include: { members: { where: { userId: user.id } } }
+        }
+      },
     });
 
-    if (!projectMember) {
-      // Check org membership
-      const orgMember = await prisma.organizationMember.findFirst({
-        where: {
-          userId: user.id,
-          organization: { projects: { some: { id: projectId } } },
-        },
-      });
-      if (!orgMember) {
-        return NextResponse.json({ error: "Access denied" }, { status: 403 });
-      }
+    if (!project) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+
+    const projectMember = project.members[0];
+    const orgMember = project.organization.members[0];
+
+    if (!projectMember && !orgMember) {
+      return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }
 
     // Get next ticket number
@@ -111,14 +131,13 @@ export async function POST(request: NextRequest) {
     });
 
     const number = (lastTicket?.number || 0) + 1;
+    const key = `${project.key}-${number}`;
 
-    // Get project key
-    const project = await prisma.project.findUnique({
-      where: { id: projectId },
-      select: { key: true },
+    // Get the default Kanban column for the status
+    const defaultColumn = await prisma.kanbanColumn.findFirst({
+      where: { projectId },
+      orderBy: { order: "asc" },
     });
-
-    const key = `${project?.key}-${number}`;
 
     const ticket = await prisma.ticket.create({
       data: {
@@ -130,7 +149,7 @@ export async function POST(request: NextRequest) {
         type: type as TicketType,
         status: status as TicketStatus,
         priority: priority as TicketPriority,
-        assigneeId,
+        assigneeId: assigneeId || user.id,
         reporterId: user.id,
         dueDate: dueDate ? new Date(dueDate) : null,
         estimatedHours,
@@ -138,6 +157,7 @@ export async function POST(request: NextRequest) {
         milestoneId,
         moduleId,
         parentId,
+        columnId: defaultColumn?.id,
       },
       include: {
         assignee: { select: { id: true, name: true, email: true, image: true } },
@@ -149,7 +169,7 @@ export async function POST(request: NextRequest) {
     // Create activity
     await prisma.activity.create({
       data: {
-        organizationId: (await prisma.project.findUnique({ where: { id: projectId } }))?.organizationId || "",
+        organizationId: project.organizationId,
         projectId,
         ticketId: ticket.id,
         userId: user.id,
@@ -188,6 +208,7 @@ export async function PUT(request: NextRequest) {
     if (data.status && data.status !== ticket.status) {
       if (data.status === "DONE") {
         data.completedAt = new Date();
+        data.progress = 100;
       }
     }
 
@@ -239,17 +260,32 @@ export async function DELETE(request: NextRequest) {
 
     const ticket = await prisma.ticket.findUnique({
       where: { id },
-      include: { project: { include: { members: { where: { userId: user.id } } } } },
+      include: {
+        project: {
+          include: {
+            members: { where: { userId: user.id } },
+            organization: {
+              include: { members: { where: { userId: user.id } } }
+            }
+          }
+        }
+      },
     });
 
     if (!ticket) {
       return NextResponse.json({ error: "Ticket not found" }, { status: 404 });
     }
 
-    const member = ticket.project.members[0];
-    if (!member || !hasPermission(member.role, "ticket.delete")) {
+    const projectMember = ticket.project.members[0];
+    const orgMember = ticket.project.organization.members[0];
+
+    // Allow delete if user is project member with permission or org admin
+    const canDelete = (projectMember && hasPermission(projectMember.role, "ticket.delete")) ||
+                      (orgMember && hasPermission(orgMember.role, "ticket.delete"));
+
+    if (!canDelete) {
       return NextResponse.json(
-        { error: "Insufficient permissions" },
+        { error: "Insufficient permissions to delete this ticket" },
         { status: 403 }
       );
     }

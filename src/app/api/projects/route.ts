@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { getCurrentUser, requireAuth } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 
-// GET /api/projects - Get projects
+// GET /api/projects - Get projects for current user
 export async function GET(request: NextRequest) {
   try {
     const user = await getCurrentUser();
@@ -11,27 +11,18 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { searchParams } = new URL(request.url);
-    const organizationId = searchParams.get("organizationId");
-
-    if (!organizationId) {
-      return NextResponse.json(
-        { error: "Organization ID required" },
-        { status: 400 }
-      );
-    }
-
-    // Check membership
+    // Get user's organization membership
     const membership = await prisma.organizationMember.findFirst({
-      where: { organizationId, userId: user.id, isActive: true },
+      where: { userId: user.id, isActive: true },
+      orderBy: { joinedAt: "desc" },
     });
 
     if (!membership) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
+      return NextResponse.json({ projects: [] });
     }
 
     const projects = await prisma.project.findMany({
-      where: { organizationId, isActive: true },
+      where: { organizationId: membership.organizationId, isActive: true },
       include: {
         _count: { select: { members: true, tickets: true } },
         members: { where: { userId: user.id } },
@@ -72,28 +63,43 @@ export async function POST(request: NextRequest) {
   try {
     const user = await requireAuth();
     const body = await request.json();
-    const { organizationId, name, key, description, color, visibility, parentId } = body;
+    const { name, key, description, color } = body;
 
-    // Check membership and permission
+    if (!name || !key) {
+      return NextResponse.json(
+        { error: "Name and key are required" },
+        { status: 400 }
+      );
+    }
+
+    // Get user's organization membership
     const membership = await prisma.organizationMember.findFirst({
-      where: { organizationId, userId: user.id, isActive: true },
+      where: { userId: user.id, isActive: true },
+      orderBy: { joinedAt: "desc" },
     });
 
-    if (!membership || !hasPermission(membership.role, "project.create")) {
+    if (!membership) {
       return NextResponse.json(
-        { error: "Insufficient permissions" },
+        { error: "You are not a member of any organization" },
+        { status: 403 }
+      );
+    }
+
+    if (!hasPermission(membership.role, "project.create")) {
+      return NextResponse.json(
+        { error: "Insufficient permissions to create projects" },
         { status: 403 }
       );
     }
 
     // Check if key exists in organization
     const existing = await prisma.project.findFirst({
-      where: { organizationId, key },
+      where: { organizationId: membership.organizationId, key: key.toUpperCase() },
     });
 
     if (existing) {
       return NextResponse.json(
-        { error: "Project key already exists" },
+        { error: "Project key already exists in this organization" },
         { status: 400 }
       );
     }
@@ -101,13 +107,12 @@ export async function POST(request: NextRequest) {
     // Create project with default Kanban columns
     const project = await prisma.project.create({
       data: {
-        organizationId,
+        organizationId: membership.organizationId,
         name,
-        key: key.toUpperCase(),
+        key: key.toUpperCase().slice(0, 4),
         description,
-        color,
-        visibility: visibility || "PUBLIC",
-        parentId,
+        color: color || "#3B82F6",
+        visibility: "PUBLIC",
         members: {
           create: { userId: user.id, role: "MANAGER" },
         },
@@ -123,8 +128,7 @@ export async function POST(request: NextRequest) {
         { projectId: project.id, name: "Backlog", color: "#6B7280", order: 0 },
         { projectId: project.id, name: "To Do", color: "#3B82F6", order: 1 },
         { projectId: project.id, name: "In Progress", color: "#F59E0B", order: 2 },
-        { projectId: project.id, name: "In Review", color: "#8B5CF6", order: 3 },
-        { projectId: project.id, name: "Done", color: "#10B981", order: 4 },
+        { projectId: project.id, name: "Done", color: "#10B981", order: 3 },
       ],
     });
 
@@ -187,13 +191,27 @@ export async function DELETE(request: NextRequest) {
       include: { members: { where: { userId: user.id } } },
     });
 
-    if (!project || !project.members[0] || !hasPermission(project.members[0].role, "project.delete")) {
+    if (!project) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+
+    // Check if user is admin or project manager
+    const orgMembership = await prisma.organizationMember.findFirst({
+      where: { organizationId: project.organizationId, userId: user.id },
+    });
+
+    const canDelete = project.members[0]?.role === "MANAGER" ||
+                      project.members[0]?.role === "ADMIN" ||
+                      (orgMembership && hasPermission(orgMembership.role, "project.delete"));
+
+    if (!canDelete) {
       return NextResponse.json(
-        { error: "Insufficient permissions" },
+        { error: "Insufficient permissions to delete this project" },
         { status: 403 }
       );
     }
 
+    // Soft delete
     await prisma.project.update({
       where: { id },
       data: { isActive: false },

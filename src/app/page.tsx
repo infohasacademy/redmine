@@ -13,6 +13,8 @@ import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   Dialog,
   DialogContent,
@@ -64,6 +66,12 @@ import {
   AlertCircle,
   TrendingUp,
   GripVertical,
+  GraduationCap,
+  BookOpen,
+  UserCog,
+  UserPlus,
+  ClipboardList,
+  FileText,
 } from "lucide-react";
 
 interface Project {
@@ -87,12 +95,78 @@ interface Ticket {
   projectId: string;
 }
 
-interface KanbanColumn {
+interface Teacher {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone?: string;
+  employeeId?: string;
+  qualification?: string;
+  specialization?: string;
+  joinDate?: string;
+  isActive: boolean;
+  classes?: { id: string; name: string; code?: string }[];
+}
+
+interface Student {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email?: string;
+  phone?: string;
+  studentId?: string;
+  dateOfBirth?: string;
+  gender?: string;
+  isActive: boolean;
+  enrollments?: { class: { id: string; name: string; code?: string } }[];
+}
+
+interface AcademicSession {
   id: string;
   name: string;
-  color: string;
-  order: number;
-  tickets: Ticket[];
+  startDate: string;
+  endDate: string;
+  isActive: boolean;
+  _count?: { classes: number };
+}
+
+interface Class {
+  id: string;
+  name: string;
+  code?: string;
+  description?: string;
+  capacity: number;
+  room?: string;
+  schedule?: string;
+  teacher?: { id: string; firstName: string; lastName: string } | null;
+  session?: { id: string; name: string } | null;
+  _count?: { enrollments: number };
+}
+
+interface Grade {
+  id: string;
+  title: string;
+  type: string;
+  maxScore: number;
+  score: number;
+  percentage?: number;
+  letterGrade?: string;
+  date?: string;
+  comments?: string;
+  student: { id: string; firstName: string; lastName: string; studentId?: string };
+  class: { id: string; name: string; code?: string };
+  session: { id: string; name: string };
+}
+
+interface AttendanceRecord {
+  id: string;
+  date: string;
+  status: string;
+  notes?: string;
+  student: { id: string; firstName: string; lastName: string; studentId?: string };
+  class: { id: string; name: string; code?: string };
+  session: { id: string; name: string };
 }
 
 function DashboardContent() {
@@ -106,18 +180,56 @@ function DashboardContent() {
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [tickets, setTickets] = useState<Ticket[]>([]);
-  const [kanbanColumns, setKanbanColumns] = useState<KanbanColumn[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Education states
+  const [teachers, setTeachers] = useState<Teacher[]>([]);
+  const [students, setStudents] = useState<Student[]>([]);
+  const [sessions, setSessions] = useState<AcademicSession[]>([]);
+  const [classes, setClasses] = useState<Class[]>([]);
+  const [grades, setGrades] = useState<Grade[]>([]);
+  const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
+  const [activeEducationTab, setActiveEducationTab] = useState("teachers");
 
   // Dialog states
   const [projectDialog, setProjectDialog] = useState(false);
   const [ticketDialog, setTicketDialog] = useState(false);
   const [deleteDialog, setDeleteDialog] = useState(false);
+  const [teacherDialog, setTeacherDialog] = useState(false);
+  const [studentDialog, setStudentDialog] = useState(false);
+  const [sessionDialog, setSessionDialog] = useState(false);
+  const [classDialog, setClassDialog] = useState(false);
+  const [gradeDialog, setGradeDialog] = useState(false);
+  const [attendanceDialog, setAttendanceDialog] = useState(false);
 
   // Form states
   const [projectForm, setProjectForm] = useState({ name: "", key: "", description: "", color: "#3B82F6" });
   const [ticketForm, setTicketForm] = useState({ title: "", description: "", priority: "MEDIUM", projectId: "" });
-  const [deleteTarget, setDeleteTarget] = useState<{ type: "project" | "ticket"; id: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ type: string; id: string } | null>(null);
+
+  // Education form states
+  const [teacherForm, setTeacherForm] = useState({
+    firstName: "", lastName: "", email: "", phone: "", employeeId: "",
+    qualification: "", specialization: "", joinDate: ""
+  });
+  const [studentForm, setStudentForm] = useState({
+    firstName: "", lastName: "", email: "", phone: "", studentId: "",
+    dateOfBirth: "", gender: "", address: "", enrollDate: ""
+  });
+  const [sessionForm, setSessionForm] = useState({
+    name: "", startDate: "", endDate: "", isActive: false
+  });
+  const [classForm, setClassForm] = useState({
+    name: "", code: "", description: "", sessionId: "", teacherId: "",
+    capacity: 30, room: "", schedule: ""
+  });
+  const [gradeForm, setGradeForm] = useState({
+    classId: "", studentId: "", sessionId: "", type: "ASSIGNMENT",
+    title: "", description: "", maxScore: 100, score: 0, date: "", comments: ""
+  });
+  const [attendanceForm, setAttendanceForm] = useState({
+    classId: "", studentId: "", sessionId: "", date: "", status: "PRESENT", notes: ""
+  });
 
   const [stats, setStats] = useState({
     totalProjects: 0,
@@ -171,11 +283,55 @@ function DashboardContent() {
     }
   }, [session, toast]);
 
+  // Fetch education data
+  const fetchEducationData = useCallback(async () => {
+    if (!session?.user) return;
+
+    try {
+      const [teachersRes, studentsRes, sessionsRes, classesRes, gradesRes, attendanceRes] = await Promise.all([
+        fetch("/api/education/teachers"),
+        fetch("/api/education/students"),
+        fetch("/api/education/sessions"),
+        fetch("/api/education/classes"),
+        fetch("/api/education/grades"),
+        fetch("/api/education/attendance"),
+      ]);
+
+      if (teachersRes.ok) {
+        const data = await teachersRes.json();
+        setTeachers(data.teachers || []);
+      }
+      if (studentsRes.ok) {
+        const data = await studentsRes.json();
+        setStudents(data.students || []);
+      }
+      if (sessionsRes.ok) {
+        const data = await sessionsRes.json();
+        setSessions(data.sessions || []);
+      }
+      if (classesRes.ok) {
+        const data = await classesRes.json();
+        setClasses(data.classes || []);
+      }
+      if (gradesRes.ok) {
+        const data = await gradesRes.json();
+        setGrades(data.grades || []);
+      }
+      if (attendanceRes.ok) {
+        const data = await attendanceRes.json();
+        setAttendance(data.attendance || []);
+      }
+    } catch (error) {
+      console.error("Failed to fetch education data:", error);
+    }
+  }, [session]);
+
   useEffect(() => {
     if (session?.user) {
       fetchData();
+      fetchEducationData();
     }
-  }, [session, fetchData]);
+  }, [session, fetchData, fetchEducationData]);
 
   // Create project
   const handleCreateProject = async () => {
@@ -228,7 +384,22 @@ function DashboardContent() {
     if (!deleteTarget) return;
 
     try {
-      const endpoint = deleteTarget.type === "project" ? `/api/projects/${deleteTarget.id}` : `/api/tickets/${deleteTarget.id}`;
+      const endpoint = deleteTarget.type === "project"
+        ? `/api/projects/${deleteTarget.id}`
+        : deleteTarget.type === "ticket"
+        ? `/api/tickets/${deleteTarget.id}`
+        : deleteTarget.type === "teacher"
+        ? `/api/education/teachers?id=${deleteTarget.id}`
+        : deleteTarget.type === "student"
+        ? `/api/education/students?id=${deleteTarget.id}`
+        : deleteTarget.type === "session"
+        ? `/api/education/sessions?id=${deleteTarget.id}`
+        : deleteTarget.type === "class"
+        ? `/api/education/classes?id=${deleteTarget.id}`
+        : deleteTarget.type === "grade"
+        ? `/api/education/grades?id=${deleteTarget.id}`
+        : `/api/education/attendance?id=${deleteTarget.id}`;
+
       const res = await fetch(endpoint, { method: "DELETE" });
 
       if (res.ok) {
@@ -236,11 +407,145 @@ function DashboardContent() {
         setDeleteDialog(false);
         setDeleteTarget(null);
         fetchData();
+        fetchEducationData();
       } else {
         toast({ title: "Error", description: "Failed to delete", variant: "destructive" });
       }
     } catch (error) {
       toast({ title: "Error", description: "Failed to delete", variant: "destructive" });
+    }
+  };
+
+  // Education CRUD handlers
+  const handleCreateTeacher = async () => {
+    try {
+      const res = await fetch("/api/education/teachers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(teacherForm),
+      });
+
+      if (res.ok) {
+        toast({ title: "Success", description: "Teacher created successfully" });
+        setTeacherDialog(false);
+        setTeacherForm({ firstName: "", lastName: "", email: "", phone: "", employeeId: "", qualification: "", specialization: "", joinDate: "" });
+        fetchEducationData();
+      } else {
+        const error = await res.json();
+        toast({ title: "Error", description: error.error || "Failed to create teacher", variant: "destructive" });
+      }
+    } catch (error) {
+      toast({ title: "Error", description: "Failed to create teacher", variant: "destructive" });
+    }
+  };
+
+  const handleCreateStudent = async () => {
+    try {
+      const res = await fetch("/api/education/students", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(studentForm),
+      });
+
+      if (res.ok) {
+        toast({ title: "Success", description: "Student created successfully" });
+        setStudentDialog(false);
+        setStudentForm({ firstName: "", lastName: "", email: "", phone: "", studentId: "", dateOfBirth: "", gender: "", address: "", enrollDate: "" });
+        fetchEducationData();
+      } else {
+        const error = await res.json();
+        toast({ title: "Error", description: error.error || "Failed to create student", variant: "destructive" });
+      }
+    } catch (error) {
+      toast({ title: "Error", description: "Failed to create student", variant: "destructive" });
+    }
+  };
+
+  const handleCreateSession = async () => {
+    try {
+      const res = await fetch("/api/education/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(sessionForm),
+      });
+
+      if (res.ok) {
+        toast({ title: "Success", description: "Session created successfully" });
+        setSessionDialog(false);
+        setSessionForm({ name: "", startDate: "", endDate: "", isActive: false });
+        fetchEducationData();
+      } else {
+        const error = await res.json();
+        toast({ title: "Error", description: error.error || "Failed to create session", variant: "destructive" });
+      }
+    } catch (error) {
+      toast({ title: "Error", description: "Failed to create session", variant: "destructive" });
+    }
+  };
+
+  const handleCreateClass = async () => {
+    try {
+      const res = await fetch("/api/education/classes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(classForm),
+      });
+
+      if (res.ok) {
+        toast({ title: "Success", description: "Class created successfully" });
+        setClassDialog(false);
+        setClassForm({ name: "", code: "", description: "", sessionId: "", teacherId: "", capacity: 30, room: "", schedule: "" });
+        fetchEducationData();
+      } else {
+        const error = await res.json();
+        toast({ title: "Error", description: error.error || "Failed to create class", variant: "destructive" });
+      }
+    } catch (error) {
+      toast({ title: "Error", description: "Failed to create class", variant: "destructive" });
+    }
+  };
+
+  const handleCreateGrade = async () => {
+    try {
+      const res = await fetch("/api/education/grades", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(gradeForm),
+      });
+
+      if (res.ok) {
+        toast({ title: "Success", description: "Grade recorded successfully" });
+        setGradeDialog(false);
+        setGradeForm({ classId: "", studentId: "", sessionId: "", type: "ASSIGNMENT", title: "", description: "", maxScore: 100, score: 0, date: "", comments: "" });
+        fetchEducationData();
+      } else {
+        const error = await res.json();
+        toast({ title: "Error", description: error.error || "Failed to record grade", variant: "destructive" });
+      }
+    } catch (error) {
+      toast({ title: "Error", description: "Failed to record grade", variant: "destructive" });
+    }
+  };
+
+  const handleCreateAttendance = async () => {
+    try {
+      const res = await fetch("/api/education/attendance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(attendanceForm),
+      });
+
+      if (res.ok) {
+        toast({ title: "Success", description: "Attendance recorded successfully" });
+        setAttendanceDialog(false);
+        setAttendanceForm({ classId: "", studentId: "", sessionId: "", date: "", status: "PRESENT", notes: "" });
+        fetchEducationData();
+      } else {
+        const error = await res.json();
+        toast({ title: "Error", description: error.error || "Failed to record attendance", variant: "destructive" });
+      }
+    } catch (error) {
+      toast({ title: "Error", description: "Failed to record attendance", variant: "destructive" });
     }
   };
 
@@ -251,6 +556,7 @@ function DashboardContent() {
     { id: "projects", label: "Projects", icon: FolderKanban },
     { id: "kanban", label: "Kanban Board", icon: Kanban },
     { id: "calendar", label: "Calendar", icon: Calendar },
+    { id: "education", label: "Education", icon: GraduationCap },
     { id: "chat", label: "Team Chat", icon: MessageSquare },
   ];
 
@@ -270,6 +576,423 @@ function DashboardContent() {
   }
 
   if (!session) return null;
+
+  // Education Tab Content
+  const renderEducationContent = () => (
+    <Tabs value={activeEducationTab} onValueChange={setActiveEducationTab} className="w-full">
+      <TabsList className="grid w-full grid-cols-6 mb-6">
+        <TabsTrigger value="teachers" className="flex items-center gap-2">
+          <UserCog className="h-4 w-4" />
+          Teachers
+        </TabsTrigger>
+        <TabsTrigger value="students" className="flex items-center gap-2">
+          <UserPlus className="h-4 w-4" />
+          Students
+        </TabsTrigger>
+        <TabsTrigger value="sessions" className="flex items-center gap-2">
+          <Calendar className="h-4 w-4" />
+          Sessions
+        </TabsTrigger>
+        <TabsTrigger value="classes" className="flex items-center gap-2">
+          <BookOpen className="h-4 w-4" />
+          Classes
+        </TabsTrigger>
+        <TabsTrigger value="grades" className="flex items-center gap-2">
+          <FileText className="h-4 w-4" />
+          Grades
+        </TabsTrigger>
+        <TabsTrigger value="attendance" className="flex items-center gap-2">
+          <ClipboardList className="h-4 w-4" />
+          Attendance
+        </TabsTrigger>
+      </TabsList>
+
+      {/* Teachers Tab */}
+      <TabsContent value="teachers">
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Teachers</CardTitle>
+                <CardDescription>Manage teaching staff</CardDescription>
+              </div>
+              <Button onClick={() => setTeacherDialog(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add Teacher
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {teachers.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <UserCog className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No teachers yet. Add your first teacher to get started.</p>
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Phone</TableHead>
+                    <TableHead>Employee ID</TableHead>
+                    <TableHead>Specialization</TableHead>
+                    <TableHead>Classes</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {teachers.map((teacher) => (
+                    <TableRow key={teacher.id}>
+                      <TableCell className="font-medium">{teacher.firstName} {teacher.lastName}</TableCell>
+                      <TableCell>{teacher.email}</TableCell>
+                      <TableCell>{teacher.phone || "-"}</TableCell>
+                      <TableCell>{teacher.employeeId || "-"}</TableCell>
+                      <TableCell>{teacher.specialization || "-"}</TableCell>
+                      <TableCell>{teacher.classes?.length || 0}</TableCell>
+                      <TableCell>
+                        <Badge variant={teacher.isActive ? "default" : "secondary"}>
+                          {teacher.isActive ? "Active" : "Inactive"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive"
+                          onClick={() => { setDeleteTarget({ type: "teacher", id: teacher.id }); setDeleteDialog(true); }}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      </TabsContent>
+
+      {/* Students Tab */}
+      <TabsContent value="students">
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Students</CardTitle>
+                <CardDescription>Manage student records</CardDescription>
+              </div>
+              <Button onClick={() => setStudentDialog(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add Student
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {students.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <UserPlus className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No students yet. Add your first student to get started.</p>
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Student ID</TableHead>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Phone</TableHead>
+                    <TableHead>Gender</TableHead>
+                    <TableHead>Enrollments</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {students.map((student) => (
+                    <TableRow key={student.id}>
+                      <TableCell className="font-medium">{student.firstName} {student.lastName}</TableCell>
+                      <TableCell>{student.studentId || "-"}</TableCell>
+                      <TableCell>{student.email || "-"}</TableCell>
+                      <TableCell>{student.phone || "-"}</TableCell>
+                      <TableCell>{student.gender || "-"}</TableCell>
+                      <TableCell>{student.enrollments?.length || 0}</TableCell>
+                      <TableCell>
+                        <Badge variant={student.isActive ? "default" : "secondary"}>
+                          {student.isActive ? "Active" : "Inactive"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive"
+                          onClick={() => { setDeleteTarget({ type: "student", id: student.id }); setDeleteDialog(true); }}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      </TabsContent>
+
+      {/* Sessions Tab */}
+      <TabsContent value="sessions">
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Academic Sessions</CardTitle>
+                <CardDescription>Manage academic terms/semesters</CardDescription>
+              </div>
+              <Button onClick={() => setSessionDialog(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add Session
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {sessions.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <Calendar className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No sessions yet. Create your first academic session to get started.</p>
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Start Date</TableHead>
+                    <TableHead>End Date</TableHead>
+                    <TableHead>Classes</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {sessions.map((sess) => (
+                    <TableRow key={sess.id}>
+                      <TableCell className="font-medium">{sess.name}</TableCell>
+                      <TableCell>{new Date(sess.startDate).toLocaleDateString()}</TableCell>
+                      <TableCell>{new Date(sess.endDate).toLocaleDateString()}</TableCell>
+                      <TableCell>{sess._count?.classes || 0}</TableCell>
+                      <TableCell>
+                        <Badge variant={sess.isActive ? "default" : "secondary"}>
+                          {sess.isActive ? "Active" : "Inactive"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive"
+                          onClick={() => { setDeleteTarget({ type: "session", id: sess.id }); setDeleteDialog(true); }}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      </TabsContent>
+
+      {/* Classes Tab */}
+      <TabsContent value="classes">
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Classes</CardTitle>
+                <CardDescription>Manage class offerings</CardDescription>
+              </div>
+              <Button onClick={() => setClassDialog(true)} disabled={sessions.length === 0}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add Class
+              </Button>
+            </div>
+            {sessions.length === 0 && (
+              <p className="text-sm text-orange-500 mt-2">Please create an academic session first before adding classes.</p>
+            )}
+          </CardHeader>
+          <CardContent>
+            {classes.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <BookOpen className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No classes yet. Create your first class to get started.</p>
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Code</TableHead>
+                    <TableHead>Teacher</TableHead>
+                    <TableHead>Session</TableHead>
+                    <TableHead>Room</TableHead>
+                    <TableHead>Enrolled</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {classes.map((cls) => (
+                    <TableRow key={cls.id}>
+                      <TableCell className="font-medium">{cls.name}</TableCell>
+                      <TableCell>{cls.code || "-"}</TableCell>
+                      <TableCell>
+                        {cls.teacher ? `${cls.teacher.firstName} ${cls.teacher.lastName}` : "Unassigned"}
+                      </TableCell>
+                      <TableCell>{cls.session?.name || "-"}</TableCell>
+                      <TableCell>{cls.room || "-"}</TableCell>
+                      <TableCell>{cls._count?.enrollments || 0}/{cls.capacity}</TableCell>
+                      <TableCell className="text-right">
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive"
+                          onClick={() => { setDeleteTarget({ type: "class", id: cls.id }); setDeleteDialog(true); }}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      </TabsContent>
+
+      {/* Grades Tab */}
+      <TabsContent value="grades">
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Grades</CardTitle>
+                <CardDescription>Student grade records</CardDescription>
+              </div>
+              <Button onClick={() => setGradeDialog(true)} disabled={classes.length === 0 || students.length === 0 || sessions.length === 0}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add Grade
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {grades.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No grades recorded yet. Add your first grade to get started.</p>
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Student</TableHead>
+                    <TableHead>Class</TableHead>
+                    <TableHead>Title</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Score</TableHead>
+                    <TableHead>Grade</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {grades.map((grade) => (
+                    <TableRow key={grade.id}>
+                      <TableCell className="font-medium">
+                        {grade.student.firstName} {grade.student.lastName}
+                      </TableCell>
+                      <TableCell>{grade.class.name}</TableCell>
+                      <TableCell>{grade.title}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline">{grade.type}</Badge>
+                      </TableCell>
+                      <TableCell>{grade.score}/{grade.maxScore}</TableCell>
+                      <TableCell>
+                        <Badge variant={grade.letterGrade === "A" || grade.letterGrade === "B" ? "default" : grade.letterGrade === "C" ? "secondary" : "destructive"}>
+                          {grade.letterGrade}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>{grade.date ? new Date(grade.date).toLocaleDateString() : "-"}</TableCell>
+                      <TableCell className="text-right">
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive"
+                          onClick={() => { setDeleteTarget({ type: "grade", id: grade.id }); setDeleteDialog(true); }}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      </TabsContent>
+
+      {/* Attendance Tab */}
+      <TabsContent value="attendance">
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Attendance</CardTitle>
+                <CardDescription>Student attendance records</CardDescription>
+              </div>
+              <Button onClick={() => setAttendanceDialog(true)} disabled={classes.length === 0 || students.length === 0 || sessions.length === 0}>
+                <Plus className="mr-2 h-4 w-4" />
+                Record Attendance
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {attendance.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <ClipboardList className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No attendance records yet. Record your first attendance to get started.</p>
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Student</TableHead>
+                    <TableHead>Class</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Notes</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {attendance.map((att) => (
+                    <TableRow key={att.id}>
+                      <TableCell className="font-medium">
+                        {att.student.firstName} {att.student.lastName}
+                      </TableCell>
+                      <TableCell>{att.class.name}</TableCell>
+                      <TableCell>{new Date(att.date).toLocaleDateString()}</TableCell>
+                      <TableCell>
+                        <Badge variant={
+                          att.status === "PRESENT" ? "default" :
+                          att.status === "LATE" ? "secondary" :
+                          att.status === "EXCUSED" ? "outline" : "destructive"
+                        }>
+                          {att.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>{att.notes || "-"}</TableCell>
+                      <TableCell className="text-right">
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive"
+                          onClick={() => { setDeleteTarget({ type: "attendance", id: att.id }); setDeleteDialog(true); }}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      </TabsContent>
+    </Tabs>
+  );
 
   return (
     <div className="min-h-screen bg-background flex">
@@ -431,6 +1154,16 @@ function DashboardContent() {
             <div className="flex items-center justify-center h-64">
               <RefreshCw className="h-8 w-8 animate-spin text-primary" />
             </div>
+          ) : activeView === "education" ? (
+            <>
+              <div className="flex gap-4 mb-6">
+                <Button variant="ghost" onClick={() => { fetchData(); fetchEducationData(); }}>
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Refresh
+                </Button>
+              </div>
+              {renderEducationContent()}
+            </>
           ) : (
             <>
               {/* Action Buttons */}
@@ -749,6 +1482,399 @@ function DashboardContent() {
             <Button variant="outline" onClick={() => setTicketDialog(false)}>Cancel</Button>
             <Button onClick={handleCreateTicket} disabled={!ticketForm.title || !ticketForm.projectId}>
               Create Ticket
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Teacher Dialog */}
+      <Dialog open={teacherDialog} onOpenChange={setTeacherDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add New Teacher</DialogTitle>
+            <DialogDescription>Add a new teacher to your organization</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>First Name *</Label>
+                <Input value={teacherForm.firstName} onChange={(e) => setTeacherForm({ ...teacherForm, firstName: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Last Name *</Label>
+                <Input value={teacherForm.lastName} onChange={(e) => setTeacherForm({ ...teacherForm, lastName: e.target.value })} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Email *</Label>
+              <Input type="email" value={teacherForm.email} onChange={(e) => setTeacherForm({ ...teacherForm, email: e.target.value })} />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Phone</Label>
+                <Input value={teacherForm.phone} onChange={(e) => setTeacherForm({ ...teacherForm, phone: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Employee ID</Label>
+                <Input value={teacherForm.employeeId} onChange={(e) => setTeacherForm({ ...teacherForm, employeeId: e.target.value })} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Qualification</Label>
+                <Input value={teacherForm.qualification} onChange={(e) => setTeacherForm({ ...teacherForm, qualification: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Specialization</Label>
+                <Input value={teacherForm.specialization} onChange={(e) => setTeacherForm({ ...teacherForm, specialization: e.target.value })} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Join Date</Label>
+              <Input type="date" value={teacherForm.joinDate} onChange={(e) => setTeacherForm({ ...teacherForm, joinDate: e.target.value })} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTeacherDialog(false)}>Cancel</Button>
+            <Button onClick={handleCreateTeacher} disabled={!teacherForm.firstName || !teacherForm.lastName || !teacherForm.email}>
+              Add Teacher
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Student Dialog */}
+      <Dialog open={studentDialog} onOpenChange={setStudentDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add New Student</DialogTitle>
+            <DialogDescription>Enroll a new student</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>First Name *</Label>
+                <Input value={studentForm.firstName} onChange={(e) => setStudentForm({ ...studentForm, firstName: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Last Name *</Label>
+                <Input value={studentForm.lastName} onChange={(e) => setStudentForm({ ...studentForm, lastName: e.target.value })} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Email</Label>
+                <Input type="email" value={studentForm.email} onChange={(e) => setStudentForm({ ...studentForm, email: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Phone</Label>
+                <Input value={studentForm.phone} onChange={(e) => setStudentForm({ ...studentForm, phone: e.target.value })} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Student ID</Label>
+                <Input value={studentForm.studentId} onChange={(e) => setStudentForm({ ...studentForm, studentId: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Gender</Label>
+                <Select value={studentForm.gender} onValueChange={(v) => setStudentForm({ ...studentForm, gender: v })}>
+                  <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="MALE">Male</SelectItem>
+                    <SelectItem value="FEMALE">Female</SelectItem>
+                    <SelectItem value="OTHER">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Date of Birth</Label>
+                <Input type="date" value={studentForm.dateOfBirth} onChange={(e) => setStudentForm({ ...studentForm, dateOfBirth: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Enroll Date</Label>
+                <Input type="date" value={studentForm.enrollDate} onChange={(e) => setStudentForm({ ...studentForm, enrollDate: e.target.value })} />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStudentDialog(false)}>Cancel</Button>
+            <Button onClick={handleCreateStudent} disabled={!studentForm.firstName || !studentForm.lastName}>
+              Add Student
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Session Dialog */}
+      <Dialog open={sessionDialog} onOpenChange={setSessionDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create Academic Session</DialogTitle>
+            <DialogDescription>Create a new academic term or semester</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Session Name *</Label>
+              <Input placeholder="e.g., Fall 2024" value={sessionForm.name} onChange={(e) => setSessionForm({ ...sessionForm, name: e.target.value })} />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Start Date *</Label>
+                <Input type="date" value={sessionForm.startDate} onChange={(e) => setSessionForm({ ...sessionForm, startDate: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>End Date *</Label>
+                <Input type="date" value={sessionForm.endDate} onChange={(e) => setSessionForm({ ...sessionForm, endDate: e.target.value })} />
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <input type="checkbox" id="isActive" checked={sessionForm.isActive} onChange={(e) => setSessionForm({ ...sessionForm, isActive: e.target.checked })} />
+              <Label htmlFor="isActive">Set as Active Session</Label>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSessionDialog(false)}>Cancel</Button>
+            <Button onClick={handleCreateSession} disabled={!sessionForm.name || !sessionForm.startDate || !sessionForm.endDate}>
+              Create Session
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Class Dialog */}
+      <Dialog open={classDialog} onOpenChange={setClassDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create Class</DialogTitle>
+            <DialogDescription>Add a new class offering</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Class Name *</Label>
+                <Input value={classForm.name} onChange={(e) => setClassForm({ ...classForm, name: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Code</Label>
+                <Input value={classForm.code} onChange={(e) => setClassForm({ ...classForm, code: e.target.value })} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Description</Label>
+              <Textarea value={classForm.description} onChange={(e) => setClassForm({ ...classForm, description: e.target.value })} />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Academic Session *</Label>
+                <Select value={classForm.sessionId} onValueChange={(v) => setClassForm({ ...classForm, sessionId: v })}>
+                  <SelectTrigger><SelectValue placeholder="Select session" /></SelectTrigger>
+                  <SelectContent>
+                    {sessions.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Teacher</Label>
+                <Select value={classForm.teacherId} onValueChange={(v) => setClassForm({ ...classForm, teacherId: v })}>
+                  <SelectTrigger><SelectValue placeholder="Select teacher" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Unassigned</SelectItem>
+                    {teachers.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>{t.firstName} {t.lastName}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label>Capacity</Label>
+                <Input type="number" value={classForm.capacity} onChange={(e) => setClassForm({ ...classForm, capacity: parseInt(e.target.value) || 30 })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Room</Label>
+                <Input value={classForm.room} onChange={(e) => setClassForm({ ...classForm, room: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Schedule</Label>
+                <Input placeholder="e.g., MWF 9AM" value={classForm.schedule} onChange={(e) => setClassForm({ ...classForm, schedule: e.target.value })} />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setClassDialog(false)}>Cancel</Button>
+            <Button onClick={handleCreateClass} disabled={!classForm.name || !classForm.sessionId}>
+              Create Class
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Grade Dialog */}
+      <Dialog open={gradeDialog} onOpenChange={setGradeDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Record Grade</DialogTitle>
+            <DialogDescription>Enter student grade</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Class *</Label>
+                <Select value={gradeForm.classId} onValueChange={(v) => setGradeForm({ ...gradeForm, classId: v })}>
+                  <SelectTrigger><SelectValue placeholder="Select class" /></SelectTrigger>
+                  <SelectContent>
+                    {classes.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Student *</Label>
+                <Select value={gradeForm.studentId} onValueChange={(v) => setGradeForm({ ...gradeForm, studentId: v })}>
+                  <SelectTrigger><SelectValue placeholder="Select student" /></SelectTrigger>
+                  <SelectContent>
+                    {students.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>{s.firstName} {s.lastName}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Session *</Label>
+                <Select value={gradeForm.sessionId} onValueChange={(v) => setGradeForm({ ...gradeForm, sessionId: v })}>
+                  <SelectTrigger><SelectValue placeholder="Select session" /></SelectTrigger>
+                  <SelectContent>
+                    {sessions.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Type</Label>
+                <Select value={gradeForm.type} onValueChange={(v) => setGradeForm({ ...gradeForm, type: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ASSIGNMENT">Assignment</SelectItem>
+                    <SelectItem value="QUIZ">Quiz</SelectItem>
+                    <SelectItem value="MIDTERM">Midterm</SelectItem>
+                    <SelectItem value="FINAL">Final</SelectItem>
+                    <SelectItem value="PROJECT">Project</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Title *</Label>
+              <Input value={gradeForm.title} onChange={(e) => setGradeForm({ ...gradeForm, title: e.target.value })} />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Max Score *</Label>
+                <Input type="number" value={gradeForm.maxScore} onChange={(e) => setGradeForm({ ...gradeForm, maxScore: parseFloat(e.target.value) || 100 })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Score *</Label>
+                <Input type="number" value={gradeForm.score} onChange={(e) => setGradeForm({ ...gradeForm, score: parseFloat(e.target.value) || 0 })} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Date</Label>
+              <Input type="date" value={gradeForm.date} onChange={(e) => setGradeForm({ ...gradeForm, date: e.target.value })} />
+            </div>
+            <div className="space-y-2">
+              <Label>Comments</Label>
+              <Textarea value={gradeForm.comments} onChange={(e) => setGradeForm({ ...gradeForm, comments: e.target.value })} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setGradeDialog(false)}>Cancel</Button>
+            <Button onClick={handleCreateGrade} disabled={!gradeForm.classId || !gradeForm.studentId || !gradeForm.sessionId || !gradeForm.title}>
+              Record Grade
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Attendance Dialog */}
+      <Dialog open={attendanceDialog} onOpenChange={setAttendanceDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Record Attendance</DialogTitle>
+            <DialogDescription>Mark student attendance</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Class *</Label>
+                <Select value={attendanceForm.classId} onValueChange={(v) => setAttendanceForm({ ...attendanceForm, classId: v })}>
+                  <SelectTrigger><SelectValue placeholder="Select class" /></SelectTrigger>
+                  <SelectContent>
+                    {classes.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Student *</Label>
+                <Select value={attendanceForm.studentId} onValueChange={(v) => setAttendanceForm({ ...attendanceForm, studentId: v })}>
+                  <SelectTrigger><SelectValue placeholder="Select student" /></SelectTrigger>
+                  <SelectContent>
+                    {students.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>{s.firstName} {s.lastName}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Session *</Label>
+                <Select value={attendanceForm.sessionId} onValueChange={(v) => setAttendanceForm({ ...attendanceForm, sessionId: v })}>
+                  <SelectTrigger><SelectValue placeholder="Select session" /></SelectTrigger>
+                  <SelectContent>
+                    {sessions.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Date *</Label>
+                <Input type="date" value={attendanceForm.date} onChange={(e) => setAttendanceForm({ ...attendanceForm, date: e.target.value })} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Status *</Label>
+              <Select value={attendanceForm.status} onValueChange={(v) => setAttendanceForm({ ...attendanceForm, status: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="PRESENT">Present</SelectItem>
+                  <SelectItem value="ABSENT">Absent</SelectItem>
+                  <SelectItem value="LATE">Late</SelectItem>
+                  <SelectItem value="EXCUSED">Excused</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Notes</Label>
+              <Textarea value={attendanceForm.notes} onChange={(e) => setAttendanceForm({ ...attendanceForm, notes: e.target.value })} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAttendanceDialog(false)}>Cancel</Button>
+            <Button onClick={handleCreateAttendance} disabled={!attendanceForm.classId || !attendanceForm.studentId || !attendanceForm.sessionId || !attendanceForm.date}>
+              Record Attendance
             </Button>
           </DialogFooter>
         </DialogContent>
